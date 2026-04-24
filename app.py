@@ -1,133 +1,86 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-import os
-import uuid
-from datetime import datetime, date
+from datetime import date, datetime
 import hashlib
 
-# ─── CONFIGURATION DE LA PAGE ────────────────────────────────────────────────
-st.set_page_config(
-    page_title="ChantierPro Aissa",
-    page_icon="🏗️",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+# --- CONFIGURATION DE LA PAGE ---
+st.set_page_config(page_title="Aissa Pilot v3", layout="wide", page_icon="🏗️")
 
-# ─── PARAMÈTRES ET DOSSIERS ──────────────────────────────────────────────────
+# --- SÉCURITÉ ---
 USERS = {"Aissa": hashlib.sha256("27021985".encode()).hexdigest()}
-DATA_DIR = "data"
-PHOTOS_DIR = "data/photos"
-FILES = {
-    "chantiers": os.path.join(DATA_DIR, "chantiers.csv"),
-    "finances": os.path.join(DATA_DIR, "finances.csv"),
-    "taches": os.path.join(DATA_DIR, "taches.csv"),
-}
-PROJETS = ["Résidence Al Nour", "Villa Targa", "Immeuble Hay Riad", "Chantier Centre-Ville", "Autre"]
 
-# ─── FONCTIONS TECHNIQUES ────────────────────────────────────────────────────
-def init_dirs():
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
-    if not os.path.exists(PHOTOS_DIR):
-        os.makedirs(PHOTOS_DIR)
+# --- CONNEXION GOOGLE SHEETS ---
+conn = st.connection("gsheets", type=GSheetsConnection)
 
+# --- LOGIN ---
+if "auth" not in st.session_state: st.session_state.auth = False
 
-def load_csv(key, columns):
-    path = FILES[key]
-    if os.path.exists(path):
-        return pd.read_csv(path)
-    return pd.DataFrame(columns=columns)
-
-def save_csv(key, df):
-    df.to_csv(FILES[key], index=False)
-
-# ─── INTERFACE LOGIN ─────────────────────────────────────────────────────────
-def login_page():
-    st.markdown("<h1 style='text-align: center; color: #f97316;'>🏗️ CHANTIER PRO</h1>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1, 1.5, 1])
-    with col2:
-        st.write("---")
-        u = st.text_input("Nom d'utilisateur")
-        p = st.text_input("Mot de passe", type="password")
-        if st.button("Se connecter", use_container_width=True):
-            hashed_p = hashlib.sha256(p.encode()).hexdigest()
-            if u in USERS and USERS[u] == hashed_p:
-                st.session_state.auth = True
-                st.session_state.user = u
-                st.rerun()
-            else:
-                st.error("Identifiants incorrects")
-
-# ─── APPLICATION PRINCIPALE ──────────────────────────────────────────────────
-def main():
-    init_dirs()
+if not st.session_state.auth:
+    st.title("🏗️ Accès Aissa Pilot")
+    u = st.text_input("Nom d'utilisateur")
+    p = st.text_input("Mot de passe", type="password")
+    if st.button("Se connecter"):
+        if u in USERS and hashlib.sha256(p.encode()).hexdigest() == USERS[u]:
+            st.session_state.auth = True
+            st.rerun()
+        else:
+            st.error("Identifiants incorrects")
+else:
+    # --- INTERFACE PRINCIPALE ---
+    st.sidebar.title(f"Bonjour Aissa")
     
-    if "auth" not in st.session_state:
-        st.session_state.auth = False
-
-    if not st.session_state.auth:
-        login_page()
-        return
-
-    # Menu du haut
-    st.sidebar.title(f"Bienvenue {st.session_state.user}")
-    if st.sidebar.button("Déconnexion"):
+    # Lien vers votre dossier Drive pour les photos
+    # REMPLACEZ par votre lien copié précédemment
+    url_drive_photos = "VOTRE_LIEN_DOSSIER_DRIVE_ICI"
+    st.sidebar.link_button("📸 Ouvrir mes Photos Drive", url_drive_photos)
+    
+    if st.sidebar.button("🚪 Déconnexion"):
         st.session_state.auth = False
         st.rerun()
 
-    tabs = st.tabs(["🚀 Dashboard", "📝 Rapports", "🎯 Objectifs", "💸 Finance Flash"])
+    tab1, tab2, tab3 = st.tabs(["📝 Rapport & Paiement", "⚠️ Alertes Retard", "📁 Historique"])
 
-    # --- TAB 1 : DASHBOARD ---
-    with tabs[0]:
-        st.subheader("💡 La Grande Idée du Jour")
-        st.info("Un chantier bien suivi est un chantier qui rapporte. Vérifiez vos alertes ci-dessous.")
-        
-        taches_df = load_csv("taches", ["Tâche", "Date", "Statut"])
-        if not taches_df.empty:
-            taches_df['Date'] = pd.to_datetime(taches_df['Date']).dt.date
-            retards = taches_df[(taches_df['Date'] < date.today()) & (taches_df['Statut'] != 'Terminé')]
+    # --- TAB 1 : SAISIE ---
+    with tab1:
+        st.subheader("Enregistrement du jour")
+        with st.form("main_form", clear_on_submit=True):
+            proj = st.selectbox("Projet", ["Al Nour", "Villa Targa", "Immeuble Hay Riad", "Autre"])
+            date_travail = st.date_input("Date", date.today())
+            rapport = st.text_area("Rapport des travaux (Micro clavier 🎙️)")
+            paiement = st.text_input("Avance ou Paiement urgent (ex: 500dh Ali)")
+            date_echeance = st.date_input("Date limite de la tâche (pour alerte)", date.today())
+            
+            submit = st.form_submit_button("SAUVEGARDER DANS LE CLOUD")
+            
+            if submit:
+                # Lecture du Sheets
+                data = conn.read(worksheet="Sheet1")
+                # Création de la ligne
+                new_row = pd.DataFrame([{ "Date": str(date_travail), "Projet": proj, "Rapport": rapport, "Paiement": paiement, "Echeance": str(date_echeance)}])
+                updated_df = pd.concat([data, new_row], ignore_index=True)
+                # Envoi vers Google Sheets
+                conn.update(worksheet="Sheet1", data=updated_df)
+                st.success("✅ Données envoyées vers Google Sheets !")
+
+    # --- TAB 2 : ALERTES ---
+    with tab2:
+        st.subheader("Tâches dépassant le temps programmé")
+        data_alert = conn.read(worksheet="Sheet1")
+        if not data_alert.empty:
+            today = date.today()
+            # On vérifie les dates d'échéance
+            data_alert['Echeance'] = pd.to_datetime(data_alert['Echeance']).dt.date
+            retards = data_alert[data_alert['Echeance'] < today]
+            
             if not retards.empty:
-                st.error(f"⚠️ Vous avez {len(retards)} tâche(s) en retard !")
-                st.table(retards)
+                for index, row in retards.iterrows():
+                    st.error(f"🚨 RETARD sur le projet {row['Projet']} ! Échéance dépassée le {row['Echeance']}")
+            else:
+                st.success("✅ Aucune tâche en retard pour le moment.")
 
-    # --- TAB 2 : RAPPORTS ---
-    with tabs[1]:
-        st.subheader("Nouveau Rapport de Chantier")
-        with st.form("form_rapport", clear_on_submit=True):
-            proj = st.selectbox("Projet", PROJETS)
-            txt = st.text_area("Rapport des travaux")
-            remarque = st.text_input("Remarque rapide (Note Flash)")
-            if st.form_submit_button("Enregistrer le Rapport"):
-                df = load_csv("chantiers", ["Date", "Projet", "Rapport", "Remarque"])
-                new_row = pd.DataFrame([{"Date": date.today(), "Projet": proj, "Rapport": txt, "Remarque": remarque}])
-                save_csv("chantiers", pd.concat([df, new_row]))
-                st.success("Enregistré avec succès !")
-
-    # --- TAB 3 : OBJECTIFS ---
-    with tabs[2]:
-        st.subheader("Mes Objectifs & Tâches")
-        with st.form("form_tache"):
-            t_nom = st.text_input("Nom de la tâche")
-            t_date = st.date_input("Échéance")
-            if st.form_submit_button("Ajouter"):
-                df = load_csv("taches", ["Tâche", "Date", "Statut"])
-                new_t = pd.DataFrame([{"Tâche": t_nom, "Date": t_date, "Statut": "À faire"}])
-                save_csv("taches", pd.concat([df, new_t]))
-                st.rerun()
-        st.dataframe(load_csv("taches", ["Tâche", "Date", "Statut"]), use_container_width=True)
-
-    # --- TAB 4 : FINANCE FLASH ---
-    with tabs[3]:
-        st.subheader("Paiements & Avances Urgents")
-        with st.form("form_finance"):
-            montant = st.number_input("Montant (MAD)", min_value=0)
-            dest = st.text_input("Bénéficiaire / Motif")
-            if st.form_submit_button("Enregistrer le paiement"):
-                df = load_csv("finances", ["Date", "Montant", "Bénéficiaire"])
-                new_f = pd.DataFrame([{"Date": date.today(), "Montant": montant, "Bénéficiaire": dest}])
-                save_csv("finances", pd.concat([df, new_f]))
-                st.warning("Paiement enregistré pour saisie comptable ultérieure.")
-        st.dataframe(load_csv("finances", ["Date", "Montant", "Bénéficiaire"]), use_container_width=True)
-
-if __name__ == "__main__":
-    main()
+    # --- TAB 3 : HISTORIQUE ---
+    with tab3:
+        st.subheader("Consultation des archives")
+        history = conn.read(worksheet="Sheet1")
+        st.dataframe(history.iloc[::-1]) # Du plus récent au plus ancien
